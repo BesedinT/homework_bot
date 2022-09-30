@@ -75,7 +75,8 @@ def get_api_answer(current_timestamp):
         )
         if response.status_code != HTTPStatus.OK:
             message = (f'Ошибка при получении ответа с сервера '
-                       f'{response.reason}')
+                       f'{response.status_code}: {response.reason}, '
+                       f'{response.text}')
             raise exceptions.WrongResponse(message)
         logger.info('Получен ответ от сервера')
         return response.json()
@@ -161,7 +162,7 @@ def main():
         except Exception as error:
             message = f'Сбой в работе программы: {error}'
             current_report['сообщение'] = message
-            logger.exception(error)
+            logger.exception(message)
             if current_report != prev_report:
                 send_message(bot, message)
                 prev_report = current_report.copy()
