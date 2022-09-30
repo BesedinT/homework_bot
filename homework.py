@@ -50,6 +50,7 @@ HOMEWORK_VERDICTS = {
 def send_message(bot, message):
     """Отправка сообщения."""
     try:
+        logger.info(f'Начата отправка сообщения: {message}')
         bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message)
         logger.info(f'Сообщение отправлено: {message}')
         return True
@@ -66,15 +67,15 @@ def get_api_answer(current_timestamp):
         'headers': HEADERS,
         'params': params,
     }
-    logger.info(f'Начинаем запрос к API {response_values["url"]} с '
-                f'параметрами: {response_values["params"]}')
+    logger.info('Начинаем запрос к API "{url}" с параметрами: '
+                '"{params}"'.format(**response_values))
     try:
         response = requests.get(
             **response_values
         )
         if response.status_code != HTTPStatus.OK:
             message = (f'Ошибка при получении ответа с сервера '
-                       f'{response.status_code}')
+                       f'{response.reason}')
             raise exceptions.WrongResponse(message)
         logger.info('Получен ответ от сервера')
         return response.json()
@@ -86,13 +87,14 @@ def get_api_answer(current_timestamp):
     except ValueError as value_error:
         logger.error(f'Код ответа API (ValueError): {value_error}')
     except Exception as error:
-        raise ConnectionError(f'Код ответа API к {response_values["url"]} с '
-                              f'параметрами: {response_values["params"]}'
-                              f'(ConnectionError):{error}')
+        raise ConnectionError('Код ответа API к "{url}" с '
+                              'параметрами: "{params}" (ConnectionError):'
+                              '{error}'.format(**response_values, error=error))
 
 
 def check_response(response):
     """Проверка api ответа на корректность."""
+    logger.info('Начата проверка API на кооректность')
     if not isinstance(response, Dict):
         raise TypeError("homework не является словарем!")
     if 'homeworks' not in response:
@@ -105,7 +107,6 @@ def check_response(response):
 
 def parse_status(homework):
     """Проверка статуса домашней работы."""
-    logger.info('Начата проверка API на кооректность')
     homework_name = homework.get('homework_name')
     if homework_name is None:
         raise KeyError('У homework нет имени')
@@ -115,10 +116,9 @@ def parse_status(homework):
     if homework_status not in HOMEWORK_VERDICTS:
         raise ValueError(f'Ошибка статуса homework : {homework_status}')
     logging.info(f'Новый статус {homework_status}')
-    return (f'Изменился статус проверки работы "{homework_name}". '
-            f'{HOMEWORK_VERDICTS.get(homework_status)}'
-            f'homework_name = {homework_name}, verdict = '
-            f'{HOMEWORK_VERDICTS.get(homework_status)}')
+    return ('Изменился статус проверки работы "{homework_name}". '
+            '{verdict}'.format(homework_name=homework_name,
+                               verdict=HOMEWORK_VERDICTS.get(homework_status)))
 
 
 def check_tokens():
@@ -136,7 +136,6 @@ def check_tokens():
     return check
 
 
-# flake8: noqa: C901
 def main():
     """Основная логика работы бота."""
     if not check_tokens():
@@ -150,28 +149,22 @@ def main():
             response = get_api_answer(current_timestamp)
             statuses = check_response(response)
             if statuses:
-                status = statuses[0]
-                message = parse_status(status)
-                homework_status = status.get('status')
-                current_report['сообщение'] = homework_status
+                message = parse_status(statuses[0])
+                current_report['сообщение'] = message
             if current_report != prev_report:
-                send_message(bot, message)
-                if send_message:
+                if send_message(bot, message):
                     prev_report = current_report.copy()
                     current_timestamp = response.get('current_date',
                                                      current_timestamp)
-        except response is None:
-            message = 'Пустой ответ от API'
-            logger.info(message)
-            raise exceptions.EmptyAnswersAPI(message)
+        except exceptions.EmptyAnswersAPI as error:
+            logger.info(f'Пустой ответ от API: {error}')
         except Exception as error:
             message = f'Сбой в работе программы: {error}'
             current_report['сообщение'] = message
-            logger.exception()
+            logger.exception(error)
             if current_report != prev_report:
                 send_message(bot, message)
-                if send_message:
-                    prev_report = current_report.copy()
+                prev_report = current_report.copy()
         finally:
             time.sleep(RETRY_TIME)
 

@@ -5,19 +5,19 @@ class WrongResponse(Exception):
     pass
 
 
-class RequestError():
+class RequestError(Exception):
     """Ошибка запроса."""
 
     pass
 
 
-class JSONDecodeError():
+class JSONDecodeError(Exception):
     """Ошибка преобразования в JSOND."""
 
     pass
 
 
-class EmptyAnswersAPI():
+class EmptyAnswersAPI(Exception):
     """Пустой ответ API."""
 
     pass
