@@ -17,15 +17,6 @@ import exceptions
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 LOG_FILE = os.path.join(BASE_DIR, 'telegram_bot.log')
 
-if __name__ == '__main__':
-    logging.basicConfig(
-        level=logging.INFO,
-        filename='logs.log',
-        format='%(asctime)s, %(levelname)s, %(message)s,'
-               '%(funcName)s, %(lineno)s',
-        filemode='a',
-    )
-
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 handler = logging.StreamHandler(sys.stdout)
@@ -60,7 +51,7 @@ def send_message(bot, message):
     """Отправка сообщения."""
     try:
         bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message)
-        logger.info(f'Начата отправка сообщения: {message}')
+        logger.info(f'Сообщение отправлено: {message}')
         return True
     except telegram.error.TelegramError as error:
         logger.error(f'Ошибка: {error}')
@@ -75,15 +66,15 @@ def get_api_answer(current_timestamp):
         'headers': HEADERS,
         'params': params,
     }
-    logger.info(f'Начинаем запрос к API с параметрами: {response_values}')
+    logger.info(f'Начинаем запрос к API {response_values["url"]} с '
+                f'параметрами: {response_values["params"]}')
     try:
         response = requests.get(
-            url=response_values.get('url'),
-            headers=response_values.get('headers'),
-            params=response_values.get('params')
+            **response_values
         )
         if response.status_code != HTTPStatus.OK:
-            message = 'Ошибка при получении ответа с сервера'
+            message = (f'Ошибка при получении ответа с сервера '
+                       f'{response.status_code}')
             raise exceptions.WrongResponse(message)
         logger.info('Получен ответ от сервера')
         return response.json()
@@ -94,13 +85,16 @@ def get_api_answer(current_timestamp):
                                       f'{request_error}')
     except ValueError as value_error:
         logger.error(f'Код ответа API (ValueError): {value_error}')
-    except ConnectionError as error:
-        raise requests.exceptions.ConnectionError(f'Код ответа API '
-                                                  f'(ConnectionError):{error}')
+    except Exception as error:
+        raise ConnectionError(f'Код ответа API к {response_values["url"]} с '
+                              f'параметрами: {response_values["params"]}'
+                              f'(ConnectionError):{error}')
 
 
 def check_response(response):
     """Проверка api ответа на корректность."""
+    if not isinstance(response, Dict):
+        raise TypeError("homework не является словарем!")
     if 'homeworks' not in response:
         raise exceptions.EmptyAnswersAPI('Пустой ответ от API')
     homeworks = response.get('homeworks')
@@ -111,20 +105,20 @@ def check_response(response):
 
 def parse_status(homework):
     """Проверка статуса домашней работы."""
-    if not isinstance(homework, Dict):
-        raise TypeError("homework не является словарем!")
+    logger.info('Начата проверка API на кооректность')
     homework_name = homework.get('homework_name')
     if homework_name is None:
         raise KeyError('У homework нет имени')
     homework_status = homework.get('status')
     if homework_status is None:
         raise KeyError('У homework нет статуса')
-    verdict = HOMEWORK_VERDICTS.get(homework_status)
-    if homework_status not in HOMEWORK_VERDICTS.keys():
+    if homework_status not in HOMEWORK_VERDICTS:
         raise ValueError(f'Ошибка статуса homework : {homework_status}')
     logging.info(f'Новый статус {homework_status}')
-    return (f'Изменился статус проверки работы "{homework_name}". {verdict}'
-            f'homework_name = {homework_name}, verdict = {verdict}')
+    return (f'Изменился статус проверки работы "{homework_name}". '
+            f'{HOMEWORK_VERDICTS.get(homework_status)}'
+            f'homework_name = {homework_name}, verdict = '
+            f'{HOMEWORK_VERDICTS.get(homework_status)}')
 
 
 def check_tokens():
@@ -136,7 +130,7 @@ def check_tokens():
     )
     check = True
     for name, token in tokens:
-        if token is None:
+        if not token:
             logger.critical(f'Отсутствует {name}')
             check = False
     return check
@@ -145,10 +139,9 @@ def check_tokens():
 def main():
     """Основная логика работы бота."""
     if not check_tokens():
-        telegram.Update.stop()
-        raise KeyError('Отсутствуют токены чата')
+        raise KeyError('Отсутствуют токены чата. Программа остановлена')
     bot = telegram.Bot(token=TELEGRAM_TOKEN)
-    current_timestamp = int(time.time())
+    current_timestamp = 0
     current_report = {}
     prev_report = {}
     while True:
@@ -156,25 +149,38 @@ def main():
             response = get_api_answer(current_timestamp)
             statuses = check_response(response)
             if statuses:
-                message = parse_status(statuses[0])
-                homework_name = statuses[0].get('homework_name')
-                homework_status = statuses[0].get('status')
-                current_report[homework_name] = homework_status
+                status = statuses[0]
+                message = parse_status(status)
+                homework_status = status.get('status')
+                current_report['сообщение'] = homework_status
             if current_report != prev_report:
                 send_message(bot, message)
-                prev_report = current_report.copy()
-                current_timestamp = response.get('current_date',
-                                                 current_timestamp)
+                if send_message:
+                    prev_report = current_report.copy()
+                    current_timestamp = response.get('current_date',
+                                                     current_timestamp)
+        except response is None:
+            message = 'Пустой ответ от API'
+            logger.info(message)
+            raise exceptions.EmptyAnswersAPI(message)
         except Exception as error:
             message = f'Сбой в работе программы: {error}'
-            current_report['error'] = message
-            logger.error(error)
+            current_report['сообщение'] = message
+            logger.exception()
             if current_report != prev_report:
                 send_message(bot, message)
-                prev_report = current_report.copy()
+                if send_message:
+                    prev_report = current_report.copy()
         finally:
             time.sleep(RETRY_TIME)
 
 
 if __name__ == '__main__':
+    logging.basicConfig(
+        level=logging.INFO,
+        filename='logs.log',
+        format='%(asctime)s, %(levelname)s, %(message)s,'
+               '%(funcName)s, %(lineno)s',
+        filemode='a',
+    )
     main()
